@@ -1,4 +1,4 @@
-module fookenc/external-dns
+module github.com/fookenc/external-dns
 
 go 1.24.0
 
