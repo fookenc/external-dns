@@ -242,6 +242,7 @@ func (c *Controller) RunOnce(ctx context.Context) error {
 	}
 	registryFilter := c.Registry.GetDomainFilter()
 
+	log.Debugf(`Using registryFilter: %v, and DomainFilter: %v`, registryFilter, c.DomainFilter)
 	plan := &plan.Plan{
 		Policies:       []plan.Policy{c.Policy},
 		Current:        records,

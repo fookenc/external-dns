@@ -125,12 +125,14 @@ func (t planTableRow) String() string {
 
 func (t planTable) addCurrent(e *endpoint.Endpoint) {
 	key := t.newPlanKey(e)
+	log.Debugf("Adding current endpoint to planTable: %v", key)
 	t.rows[key].current = append(t.rows[key].current, e)
 	t.rows[key].records[e.RecordType].current = e
 }
 
 func (t planTable) addCandidate(e *endpoint.Endpoint) {
 	key := t.newPlanKey(e)
+	log.Debugf("Adding candidate endpoint to planTable: %v", key)
 	t.rows[key].candidates = append(t.rows[key].candidates, e)
 	t.rows[key].records[e.RecordType].candidates = append(t.rows[key].records[e.RecordType].candidates, e)
 }
@@ -168,6 +170,7 @@ func (p *Plan) Calculate() *Plan {
 	t := newPlanTable()
 
 	if p.DomainFilter == nil {
+		log.Debugf(`DomainFilter is nil %v`, p.DomainFilter)
 		p.DomainFilter = endpoint.MatchAllDomainFilters(nil)
 	}
 
@@ -183,9 +186,11 @@ func (p *Plan) Calculate() *Plan {
 	for key, row := range t.rows {
 		// dns name not taken
 		if len(row.current) == 0 {
+			log.Debugf(`No current endpoints found`)
 			recordsByType := t.resolver.ResolveRecordTypes(key, row)
 			for _, records := range recordsByType {
 				if len(records.candidates) > 0 {
+					log.Debugf(`Candidate records found: %v`, records.current)
 					changes.Create = append(changes.Create, t.resolver.ResolveCreate(records.candidates))
 				}
 			}
@@ -193,6 +198,7 @@ func (p *Plan) Calculate() *Plan {
 
 		// dns name released or possibly owned by a different external dns
 		if len(row.current) > 0 && len(row.candidates) == 0 {
+			log.Debugf(`No candidates found, current records found: %v. Appending for deletion.`, row.current)
 			changes.Delete = append(changes.Delete, row.current...)
 		}
 
@@ -205,12 +211,14 @@ func (p *Plan) Calculate() *Plan {
 			for _, records := range recordsByType {
 				// record type not desired
 				if records.current != nil && len(records.candidates) == 0 {
+					log.Debugf(`Current should be removed: %v`, records.current)
 					changes.Delete = append(changes.Delete, records.current)
 				}
 
 				// new record type desired
 				if records.current == nil && len(records.candidates) > 0 {
 					update := t.resolver.ResolveCreate(records.candidates)
+					log.Debugf(`Record to potentially create: %v and %v`, update, records.current)
 					// creates are evaluated after all domain records have been processed to
 					// validate that this external dns has ownership claim on the domain before
 					// adding the records to planned changes.
@@ -220,8 +228,9 @@ func (p *Plan) Calculate() *Plan {
 				// update existing record
 				if records.current != nil && len(records.candidates) > 0 {
 					update := t.resolver.ResolveUpdate(records.current, records.candidates)
-
+					log.Debugf(`Record to potentially update: %v and %v`, update, records.current)
 					if shouldUpdateTTL(update, records.current) || targetChanged(update, records.current) || p.shouldUpdateProviderSpecific(update, records.current) {
+						log.Debugf(`One of these checks was confirmed to have taken place`)
 						inheritOwner(records.current, update)
 						changes.UpdateNew = append(changes.UpdateNew, update)
 						changes.UpdateOld = append(changes.UpdateOld, records.current)
@@ -252,15 +261,16 @@ func (p *Plan) Calculate() *Plan {
 	for _, pol := range p.Policies {
 		changes = pol.Apply(changes)
 	}
-
+	log.Debugf(`Changes determined: %v, %v, %v, %v`, changes.Create, changes.UpdateNew, changes.UpdateOld, changes.Delete)
 	// filter out updates this external dns does not have ownership claim over
 	if p.OwnerID != "" {
+		log.Debugf(`Filtering changes by OwnerId: %v`, p.OwnerID)
 		changes.Delete = endpoint.FilterEndpointsByOwnerID(p.OwnerID, changes.Delete)
 		changes.Delete = endpoint.RemoveDuplicates(changes.Delete)
 		changes.UpdateOld = endpoint.FilterEndpointsByOwnerID(p.OwnerID, changes.UpdateOld)
 		changes.UpdateNew = endpoint.FilterEndpointsByOwnerID(p.OwnerID, changes.UpdateNew)
 	}
-
+	log.Debugf(`Changes after OwnerId filtering: %v, %v, %v, %v`, changes.Create, changes.UpdateNew, changes.UpdateOld, changes.Delete)
 	plan := &Plan{
 		Current:        p.Current,
 		Desired:        p.Desired,
